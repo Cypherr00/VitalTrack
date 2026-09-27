@@ -38,6 +38,7 @@ dependencies:
   percent_indicator: ^4.2.5
   shared_preferences: ^2.5.3
   provider: ^6.1.5+1
+  supabase_flutter: ^2.15.4
 
 dev_dependencies:
   flutter_test:

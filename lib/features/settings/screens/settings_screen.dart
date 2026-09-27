@@ -1,15 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/config/supabase_config.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/providers/auth_provider.dart';
+import '../../../core/services/supabase_service.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../../auth/screens/login_screen.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  UserProfile? _userProfile;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    if (!SupabaseService().isReady) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+    try {
+      final user = await SupabaseService().fetchUserProfile();
+      if (mounted) {
+        setState(() {
+          _userProfile = user;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
+    final authProvider = context.watch<AuthProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final user = authProvider.currentUser ?? _userProfile;
 
     return Scaffold(
       appBar: AppBar(
@@ -18,8 +58,8 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
-          // Profile hero card
-          _buildProfileCard(isDark),
+          // Profile hero card loaded from Supabase users table
+          _buildProfileCard(isDark, user),
           const SizedBox(height: 8),
 
           _buildSection(
@@ -27,10 +67,65 @@ class SettingsScreen extends StatelessWidget {
             'Account',
             isDark,
             [
-              _buildTile(context, Icons.person_outline, 'Profile Information',
-                  'Update your personal data', isDark),
-              _buildTile(context, Icons.security_outlined, 'Privacy & Security',
-                  'Manage passwords & access', isDark),
+              _buildTile(
+                context,
+                Icons.person_outline,
+                'Full Name',
+                user?.fullName ?? 'Not set',
+                isDark,
+              ),
+              _buildTile(
+                context,
+                Icons.fingerprint,
+                'User ID',
+                user?.displayId ?? 'Not set',
+                isDark,
+              ),
+              _buildTile(
+                context,
+                Icons.email_outlined,
+                'Email',
+                user?.email ?? 'Not set',
+                isDark,
+              ),
+            ],
+          ),
+
+          _buildSection(
+            context,
+            'Database & Sync',
+            isDark,
+            [
+              ListTile(
+                leading: _iconBox(Icons.cloud_sync_outlined, isDark),
+                title: Text(
+                  'Supabase Backend',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                subtitle: Text(
+                  SupabaseConfig.isConfigured
+                      ? 'Connected (${SupabaseConfig.supabaseUrl})'
+                      : 'Not configured — please set keys',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: SupabaseConfig.isConfigured
+                        ? AppColors.normalStatus
+                        : Colors.orange,
+                  ),
+                ),
+                trailing: Icon(
+                  SupabaseConfig.isConfigured
+                      ? Icons.check_circle_rounded
+                      : Icons.warning_amber_rounded,
+                  color: SupabaseConfig.isConfigured
+                      ? AppColors.normalStatus
+                      : Colors.orange,
+                ),
+              ),
             ],
           ),
 
@@ -43,7 +138,7 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 Icons.notifications_outlined,
                 'Push Notifications',
-                'Receive health alerts',
+                'Receive health alerts when limits breach',
                 true,
                 isDark,
                 (val) {},
@@ -52,7 +147,7 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 Icons.dark_mode_outlined,
                 'Dark Mode',
-                'Easy on the eyes at night',
+                'Easy on the eyes in low light',
                 themeProvider.isDarkMode,
                 isDark,
                 (val) => themeProvider.toggleTheme(val),
@@ -66,9 +161,9 @@ class SettingsScreen extends StatelessWidget {
             isDark,
             [
               _buildTile(context, Icons.help_outline, 'Help Center',
-                  'FAQs and user guide', isDark),
+                  'Hardware pairing & scan instructions', isDark),
               _buildTile(context, Icons.info_outline, 'About Vital Track',
-                  'Version 1.0.0', isDark),
+                  'Version 1.0.0 (Production Architecture)', isDark),
             ],
           ),
 
@@ -81,7 +176,7 @@ class SettingsScreen extends StatelessWidget {
                 minimumSize: const Size(double.infinity, 54),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              onPressed: () {},
+              onPressed: () => _handleLogout(context),
               icon: const Icon(Icons.logout),
               label: const Text('Log Out',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -92,7 +187,44 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildProfileCard(bool isDark) {
+  void _handleLogout(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out of Vital Track?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.severeStatus,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await context.read<AuthProvider>().logout();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
+            },
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileCard(bool isDark, UserProfile? user) {
+    final name = user?.fullName ?? (_isLoading ? 'Loading...' : 'Vital Track User');
+    final email = user?.email ?? (_isLoading ? 'Loading...' : 'user@vitaltrack.app');
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       padding: const EdgeInsets.all(20),
@@ -114,21 +246,32 @@ class SettingsScreen extends StatelessWidget {
             child: const Icon(Icons.person, color: Colors.white, size: 36),
           ),
           const SizedBox(width: 16),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('User',
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-              SizedBox(height: 4),
-              Text('user@vitaltrack.app',
-                  style: TextStyle(fontSize: 13, color: Colors.white70)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  email,
+                  style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.edit_outlined, color: Colors.white70),
+            onPressed: _loadUser,
+            tooltip: 'Refresh Profile',
+            icon: const Icon(Icons.refresh, color: Colors.white70),
           ),
         ],
       ),

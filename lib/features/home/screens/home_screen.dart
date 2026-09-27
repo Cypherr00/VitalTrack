@@ -1,7 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/config/supabase_config.dart';
+import '../../../core/models/health_threshold.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/models/vital_record.dart';
+import '../../../core/providers/auth_provider.dart';
+import '../../../core/services/supabase_service.dart';
 import '../widgets/vital_summary_card.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -13,13 +22,14 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  // Mock data
-  final double latestTemp = 38.0;
-  final double latestSpO2 = 96.0;
-  final double latestHeartRate = 130.0;
+  final SupabaseService _supabase = SupabaseService();
 
-  // Mock user ID (6-digit) — will come from Supabase later
-  final String _userId = '482019';
+  UserProfile? _userProfile;
+  HealthThreshold? _threshold;
+  VitalRecord? _latestRecord;
+  List<VitalRecord> _recentRecords = [];
+  bool _isLoading = true;
+  StreamSubscription<List<VitalRecord>>? _streamSubscription;
 
   late AnimationController _headerController;
   late Animation<double> _headerFadeAnim;
@@ -37,232 +47,388 @@ class _HomeScreenState extends State<HomeScreen>
     _headerSlideAnim = Tween<Offset>(
       begin: const Offset(0, -0.15),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _headerController, curve: Curves.easeOut));
+    ).animate(CurvedAnimation(parent: _headerController, curve: Curves.easeOut));
     _headerController.forward();
+
+    _loadData();
   }
 
   @override
   void dispose() {
+    _streamSubscription?.cancel();
     _headerController.dispose();
     super.dispose();
   }
 
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+
+    if (!_supabase.isReady) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      // 1. Fetch user profile from auth or database
+      final authUser = context.read<AuthProvider>().currentUser;
+      final user = authUser ?? await _supabase.fetchUserProfile();
+      final userId = user?.id;
+
+      // 2. Fetch thresholds & records concurrently
+      final threshold = await _supabase.fetchThresholds(userId);
+      final latest = await _supabase.fetchLatestRecord(userId);
+      final history = await _supabase.fetchHistory(userId, 10);
+
+      if (mounted) {
+        setState(() {
+          _userProfile = user;
+          _threshold = threshold;
+          _latestRecord = latest;
+          _recentRecords = history;
+          _isLoading = false;
+        });
+      }
+
+      // 3. Listen to real-time additions from ESP hardware device
+      _streamSubscription?.cancel();
+      _streamSubscription = _supabase.streamRecentRecords(userId, 10).listen((records) {
+        if (mounted && records.isNotEmpty) {
+          setState(() {
+            _latestRecord = records.first;
+            _recentRecords = records;
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error loading Supabase data: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Color _getTempColor(double temp) {
+    final maxT = _threshold?.maxTemp ?? 37.8;
     if (temp >= 36.5 && temp <= 37.5) return AppColors.normalStatus;
-    if ((temp >= 35.0 && temp < 36.5) || (temp > 37.5 && temp <= 38.5)) {
+    if ((temp >= 35.0 && temp < 36.5) || (temp > 37.5 && temp <= maxT)) {
       return AppColors.warningStatus;
     }
     return AppColors.severeStatus;
   }
 
   Color _getSpO2Color(double spo2) {
-    if (spo2 >= 95.0 && spo2 <= 100.0) return AppColors.normalStatus;
-    if (spo2 >= 90.0 && spo2 < 95.0) return AppColors.warningStatus;
+    final minSp = _threshold?.minSpo2 ?? 94.00;
+    if (spo2 >= minSp) return AppColors.normalStatus;
+    if (spo2 >= 90.0 && spo2 < minSp) return AppColors.warningStatus;
     return AppColors.severeStatus;
   }
 
   Color _getHeartRateColor(double hr) {
-    if (hr >= 60 && hr <= 100) return AppColors.normalStatus;
-    if ((hr >= 50 && hr < 60) || (hr > 100 && hr <= 120)) {
+    final minH = _threshold?.minHr ?? 50;
+    final maxH = _threshold?.maxHr ?? 120;
+    if (hr >= minH + 10 && hr <= maxH - 20) return AppColors.normalStatus;
+    if ((hr >= minH && hr < minH + 10) || (hr > maxH - 20 && hr <= maxH)) {
       return AppColors.warningStatus;
     }
     return AppColors.severeStatus;
   }
 
-  // Show Scan Now bottom sheet with user ID
+  List<FlSpot> _getTempSpots() {
+    if (_recentRecords.isEmpty) return const [FlSpot(0, 36.6)];
+    final reversed = _recentRecords.reversed.toList();
+    return List.generate(reversed.length, (i) => FlSpot(i.toDouble(), reversed[i].temperature));
+  }
+
+  List<FlSpot> _getSpo2Spots() {
+    if (_recentRecords.isEmpty) return const [FlSpot(0, 98.0)];
+    final reversed = _recentRecords.reversed.toList();
+    return List.generate(reversed.length, (i) => FlSpot(i.toDouble(), reversed[i].spo2));
+  }
+
+  List<FlSpot> _getHrSpots() {
+    if (_recentRecords.isEmpty) return const [FlSpot(0, 75.0)];
+    final reversed = _recentRecords.reversed.toList();
+    return List.generate(reversed.length, (i) => FlSpot(i.toDouble(), reversed[i].heartRate.toDouble()));
+  }
+
   void _showScanSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final userId = _userProfile?.id ?? '000000';
+    final displayId = _userProfile?.displayId ?? '482019';
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _ScanNowSheet(userId: _userId, isDark: isDark),
+      builder: (_) => _ScanNowSheet(
+        userId: userId,
+        displayId: displayId,
+        isDark: isDark,
+        onScanComplete: () => _loadData(),
+      ),
     );
+  }
+
+  String _formatLastScanTime() {
+    if (_latestRecord == null) return 'No scans recorded yet';
+    final dt = _latestRecord!.recordedAt.toLocal();
+    final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final min = dt.minute.toString().padLeft(2, '0');
+    return 'Last scan: ${dt.day}/${dt.month}/${dt.year}, $hour:$min $period';
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textSub =
-        isDark ? Colors.grey[400]! : AppColors.primary.withAlpha(160);
+    final textSub = isDark ? Colors.grey[400]! : AppColors.primary.withAlpha(160);
     final headerBg = isDark ? const Color(0xFF1E1E1E) : AppColors.primary;
 
+    final currentTemp = _latestRecord?.temperature ?? 0.0;
+    final currentSpo2 = _latestRecord?.spo2 ?? 0.0;
+    final currentHr = _latestRecord?.heartRate.toDouble() ?? 0.0;
+    final userName = _userProfile?.fullName ?? 'User';
+
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // Collapsible gradient AppBar
-          SliverAppBar(
-            expandedHeight: 160,
-            pinned: true,
-            backgroundColor: headerBg,
-            flexibleSpace: FlexibleSpaceBar(
-              collapseMode: CollapseMode.parallax,
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: isDark
-                        ? [const Color(0xFF2A0A16), const Color(0xFF1E1E1E)]
-                        : [AppColors.primary, const Color(0xFFB5274B)],
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        color: AppColors.primary,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            // Collapsible gradient AppBar
+            SliverAppBar(
+              expandedHeight: 160,
+              pinned: true,
+              backgroundColor: headerBg,
+              flexibleSpace: FlexibleSpaceBar(
+                collapseMode: CollapseMode.parallax,
+                background: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: isDark
+                          ? [const Color(0xFF2A0A16), const Color(0xFF1E1E1E)]
+                          : [AppColors.primary, const Color(0xFFB5274B)],
+                    ),
                   ),
-                ),
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    child: FadeTransition(
-                      opacity: _headerFadeAnim,
-                      child: SlideTransition(
-                        position: _headerSlideAnim,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            CircleAvatar(
-                              radius: 30,
-                              backgroundColor: Colors.white.withAlpha(30),
-                              child: const Icon(Icons.person,
-                                  color: Colors.white, size: 34),
-                            ),
-                            const SizedBox(width: 16),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Hello, User',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      child: FadeTransition(
+                        opacity: _headerFadeAnim,
+                        child: SlideTransition(
+                          position: _headerSlideAnim,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              CircleAvatar(
+                                radius: 30,
+                                backgroundColor: Colors.white.withAlpha(30),
+                                child: const Icon(Icons.person, color: Colors.white, size: 34),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Hello, $userName',
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatLastScanTime(),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.white.withAlpha(200),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Last scan: Today, 08:30 AM',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.white.withAlpha(200),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              title: const Text(
-                'Dashboard',
-                style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600),
+                title: const Text(
+                  'Dashboard',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
-          ),
 
-          // Body content
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // ── SCAN NOW BUTTON ──────────────────────────────────────
-                _ScanNowButton(onTap: _showScanSheet),
-                const SizedBox(height: 28),
-
-                // Section label
-                Text(
-                  'VITAL SIGNS SUMMARY',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: textSub,
-                    letterSpacing: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Vital cards
-                VitalSummaryCard(
-                  title: 'Temperature',
-                  value: latestTemp,
-                  unit: '°C',
-                  max: 42.0,
-                  color: _getTempColor(latestTemp),
-                  history: _tempData(),
-                ),
-                VitalSummaryCard(
-                  title: 'Blood Oxygen',
-                  value: latestSpO2,
-                  unit: '% SpO2',
-                  max: 100.0,
-                  color: _getSpO2Color(latestSpO2),
-                  history: _spo2Data(),
-                ),
-                VitalSummaryCard(
-                  title: 'Heart Rate',
-                  value: latestHeartRate,
-                  unit: 'bpm',
-                  max: 200.0,
-                  color: _getHeartRateColor(latestHeartRate),
-                  history: _hrData(),
-                  isHeartRate: true,
-                ),
-                const SizedBox(height: 8),
-
-                // Insight card
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.warningStatus.withAlpha(20),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                        color: AppColors.warningStatus.withAlpha(80)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline,
-                          color: AppColors.warningStatus, size: 22),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Your temperature is slightly elevated. Consider resting and staying hydrated.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark
-                                ? Colors.white70
-                                : Colors.brown[800],
-                            height: 1.4,
+            // Body content
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  if (!SupabaseConfig.isConfigured)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withAlpha(30),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber.withAlpha(120)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.amber, size: 22),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Supabase credentials pending in supabase_config.dart. Add your URL and anon key to connect.',
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+
+                  // ── SCAN NOW BUTTON ──────────────────────────────────────
+                  _ScanNowButton(onTap: _showScanSheet),
+                  const SizedBox(height: 28),
+
+                  // Section label
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'VITAL SIGNS SUMMARY',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: textSub,
+                          letterSpacing: 1.4,
                         ),
                       ),
+                      if (_isLoading)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                     ],
                   ),
-                ),
-              ]),
+                  const SizedBox(height: 12),
+
+                  if (_latestRecord == null && !_isLoading)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isDark ? Colors.white12 : Colors.grey.withAlpha(50),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(Icons.health_and_safety_outlined, size: 48, color: AppColors.accent),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'No vital records found yet',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Scans sent from your ESP device will appear here in real-time. You can also tap "Scan Now" to test a recording.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 13, color: textSub),
+                          ),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    // Vital cards displaying real data from database
+                    VitalSummaryCard(
+                      title: 'Temperature',
+                      value: currentTemp,
+                      unit: '°C',
+                      max: 42.0,
+                      color: currentTemp == 0 ? Colors.grey : _getTempColor(currentTemp),
+                      history: _getTempSpots(),
+                    ),
+                    VitalSummaryCard(
+                      title: 'Blood Oxygen',
+                      value: currentSpo2,
+                      unit: '% SpO2',
+                      max: 100.0,
+                      color: currentSpo2 == 0 ? Colors.grey : _getSpO2Color(currentSpo2),
+                      history: _getSpo2Spots(),
+                    ),
+                    VitalSummaryCard(
+                      title: 'Heart Rate',
+                      value: currentHr,
+                      unit: 'bpm',
+                      max: 200.0,
+                      color: currentHr == 0 ? Colors.grey : _getHeartRateColor(currentHr),
+                      history: _getHrSpots(),
+                      isHeartRate: true,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+
+                  // Dynamic Insight card based on real findings
+                  if (_latestRecord != null)
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _latestRecord!.isNormal
+                            ? AppColors.normalStatus.withAlpha(20)
+                            : AppColors.warningStatus.withAlpha(20),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _latestRecord!.isNormal
+                              ? AppColors.normalStatus.withAlpha(80)
+                              : AppColors.warningStatus.withAlpha(80),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _latestRecord!.isNormal
+                                ? Icons.check_circle_outline
+                                : Icons.warning_amber_rounded,
+                            color: _latestRecord!.isNormal
+                                ? AppColors.normalStatus
+                                : AppColors.warningStatus,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _latestRecord!.isNormal
+                                  ? 'All vital signs are within normal parameters. Keep up the healthy habits!'
+                                  : 'One or more vital metrics exceeded standard threshold ranges. Consider resting.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white70 : Colors.brown[800],
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ]),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
-
-  List<FlSpot> _tempData() => const [
-        FlSpot(1, 36.6), FlSpot(2, 36.7), FlSpot(3, 37.1),
-        FlSpot(4, 37.5), FlSpot(5, 37.8), FlSpot(6, 38.2), FlSpot(7, 38.0),
-      ];
-
-  List<FlSpot> _spo2Data() => const [
-        FlSpot(1, 98), FlSpot(2, 99), FlSpot(3, 98),
-        FlSpot(4, 97), FlSpot(5, 96), FlSpot(6, 95), FlSpot(7, 96),
-      ];
-
-  List<FlSpot> _hrData() => const [
-        FlSpot(1, 72), FlSpot(2, 75), FlSpot(3, 80),
-        FlSpot(4, 85), FlSpot(5, 110), FlSpot(6, 125), FlSpot(7, 130),
-      ];
 }
 
 // ── Scan Now inline button ───────────────────────────────────────────────────
@@ -352,9 +518,16 @@ class _ScanNowButtonState extends State<_ScanNowButton>
 
 class _ScanNowSheet extends StatefulWidget {
   final String userId;
+  final String displayId;
   final bool isDark;
+  final VoidCallback onScanComplete;
 
-  const _ScanNowSheet({required this.userId, required this.isDark});
+  const _ScanNowSheet({
+    required this.userId,
+    required this.displayId,
+    required this.isDark,
+    required this.onScanComplete,
+  });
 
   @override
   State<_ScanNowSheet> createState() => _ScanNowSheetState();
@@ -397,7 +570,24 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
       _done = false;
     });
     _scanCtrl.repeat(reverse: true);
-    await Future.delayed(const Duration(seconds: 3));
+
+    // If Supabase is ready, insert a simulated scan to test the pipeline
+    if (SupabaseService().isReady && widget.userId != '000000') {
+      try {
+        await SupabaseService().insertRecord(
+          userId: widget.userId,
+          temperature: 36.8,
+          spo2: 98.0,
+          heartRate: 74,
+          isNormal: true,
+        );
+      } catch (e) {
+        debugPrint('Insert test scan error: $e');
+      }
+    } else {
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
     _scanCtrl.stop();
     _scanCtrl.reset();
     if (mounted) {
@@ -405,14 +595,15 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
         _isScanning = false;
         _done = true;
       });
+      widget.onScanComplete();
     }
   }
 
   void _copyId() {
-    Clipboard.setData(ClipboardData(text: widget.userId));
+    Clipboard.setData(ClipboardData(text: widget.displayId));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('User ID copied to clipboard'),
+        content: Text('ID (${widget.displayId}) copied to clipboard'),
         backgroundColor: AppColors.primary,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -436,7 +627,6 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
           Container(
             width: 40,
             height: 4,
@@ -494,10 +684,9 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // Spaced 6-digit display
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: widget.userId.split('').asMap().entries.map((e) {
+                    children: widget.displayId.split('').asMap().entries.map((e) {
                       return Row(
                         children: [
                           Container(
@@ -506,8 +695,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                             decoration: BoxDecoration(
                               color: Colors.white.withAlpha(25),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                  color: Colors.white.withAlpha(60)),
+                              border: Border.all(color: Colors.white.withAlpha(60)),
                             ),
                             child: Center(
                               child: Text(
@@ -520,7 +708,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                               ),
                             ),
                           ),
-                          if (e.key < widget.userId.length - 1)
+                          if (e.key < widget.displayId.length - 1)
                             const SizedBox(width: 8),
                         ],
                       );
@@ -534,10 +722,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                       const SizedBox(width: 4),
                       Text(
                         'Tap to copy',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white.withAlpha(160),
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.white.withAlpha(160)),
                       ),
                     ],
                   ),
@@ -552,7 +737,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
           if (_isScanning)
             AnimatedBuilder(
               animation: _scanCtrl,
-              builder: (_, __) => SizedBox(
+              builder: (context, child) => SizedBox(
                 height: 80,
                 child: Stack(
                   alignment: Alignment.center,
@@ -582,8 +767,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                         ),
                       ),
                     ),
-                    const Icon(Icons.sensors_rounded,
-                        color: AppColors.primary, size: 28),
+                    const Icon(Icons.sensors_rounded, color: AppColors.primary, size: 28),
                   ],
                 ),
               ),
@@ -591,14 +775,16 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
           else if (_done)
             Column(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: AppColors.normalStatus, size: 56),
+                const Icon(Icons.check_circle_rounded, color: AppColors.normalStatus, size: 56),
                 const SizedBox(height: 8),
-                Text('Scan complete!',
-                    style: TextStyle(
-                        color: AppColors.normalStatus,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
+                const Text(
+                  'Scan recorded successfully!',
+                  style: TextStyle(
+                    color: AppColors.normalStatus,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
               ],
             ),
 
@@ -615,13 +801,10 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                       ? () => Navigator.pop(context)
                       : _startScan,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _done
-                    ? AppColors.normalStatus
-                    : AppColors.primary,
+                backgroundColor: _done ? AppColors.normalStatus : AppColors.primary,
                 foregroundColor: Colors.white,
                 disabledBackgroundColor: AppColors.primary.withAlpha(100),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
               ),
               child: Text(
@@ -630,8 +813,7 @@ class _ScanNowSheetState extends State<_ScanNowSheet>
                     : _done
                         ? 'Done'
                         : 'Start Scanning',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
           ),
