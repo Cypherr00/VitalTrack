@@ -33,10 +33,20 @@ class VitalRecord {
       spo2: (json['spo2'] as num?)?.toDouble() ?? 0.0,
       heartRate: (json['heart_rate'] as num?)?.toInt() ?? 0,
       isNormal: normal,
-      recordedAt: json['recorded_at'] != null
-          ? DateTime.parse(json['recorded_at'] as String)
-          : DateTime.now(),
+      recordedAt: _parseDateTime(json['recorded_at']),
     );
+  }
+
+  /// Safely parses a Supabase timestamp that may arrive as a String, DateTime,
+  /// int (epoch ms), or double (epoch ms as a float).
+  static DateTime _parseDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    return DateTime.now();
   }
 
   Map<String, dynamic> toJson() {

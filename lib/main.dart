@@ -6,14 +6,13 @@ import 'core/config/supabase_config.dart';
 import 'core/providers/auth_provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
-import 'features/auth/screens/login_screen.dart';
-import 'features/main/screens/main_layout.dart';
+import 'features/splash/screens/splash_screen.dart';
 
 void main() async {
   // Required for SharedPreferences and plugins to work before runApp
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Supabase if credentials are provided in supabase_config.dart
+  // Initialize Supabase if credentials are provided in secrets.dart
   if (SupabaseConfig.isConfigured) {
     try {
       await Supabase.initialize(
@@ -42,18 +41,8 @@ class VitalTrackApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<ThemeProvider, AuthProvider>(
-      builder: (context, themeProvider, authProvider, child) {
-        // Wait for SharedPreferences and session to load before rendering
-        if (!themeProvider.isLoaded || authProvider.isLoading) {
-          return const MaterialApp(
-            debugShowCheckedModeBanner: false,
-            home: Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            ),
-          );
-        }
-
+    return Consumer<ThemeProvider>(
+      builder: (context, themeProvider, child) {
         final isDark = themeProvider.isDarkMode;
 
         // Sync Android status bar style with theme
@@ -67,10 +56,8 @@ class VitalTrackApp extends StatelessWidget {
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: themeProvider.themeMode,
-          // Show LoginScreen first if not authenticated, otherwise go straight to MainLayout
-          home: authProvider.isAuthenticated
-              ? const MainLayout()
-              : const LoginScreen(),
+          // Always start with the splash screen — it handles auth routing
+          home: const SplashScreen(),
           debugShowCheckedModeBanner: false,
         );
       },

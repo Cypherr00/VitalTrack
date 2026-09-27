@@ -25,13 +25,23 @@ class UserProfile {
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       id: json['id']?.toString() ?? '',
-      fullName: json['full_name'] as String? ?? 'User',
-      email: json['email'] as String? ?? '',
-      password: json['password'] as String?,
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'] as String)
-          : DateTime.now(),
+      fullName: json['full_name']?.toString() ?? 'User',
+      email: json['email']?.toString() ?? '',
+      password: json['password']?.toString(),
+      createdAt: _parseDateTime(json['created_at']),
     );
+  }
+
+  /// Safely parses a Supabase timestamp that may arrive as a String, DateTime,
+  /// int (epoch ms), or double (epoch ms as a float).
+  static DateTime _parseDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    return DateTime.now();
   }
 
   Map<String, dynamic> toJson() {

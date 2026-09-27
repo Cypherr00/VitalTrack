@@ -49,10 +49,20 @@ class HealthThreshold {
       minHr: parsedMinHr,
       maxHr: parsedMaxHr,
       maxTemp: (json['max_temp'] as num?)?.toDouble() ?? 37.8,
-      updatedAt: json['updated_at'] != null
-          ? DateTime.parse(json['updated_at'] as String)
-          : DateTime.now(),
+      updatedAt: _parseDateTime(json['updated_at']),
     );
+  }
+
+  /// Safely parses a Supabase timestamp that may arrive as a String, DateTime,
+  /// int (epoch ms), or double (epoch ms as a float).
+  static DateTime _parseDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    return DateTime.now();
   }
 
   Map<String, dynamic> toJson() {

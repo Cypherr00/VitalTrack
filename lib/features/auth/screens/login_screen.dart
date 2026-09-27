@@ -41,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (mounted) {
-        Navigator.of(context).pushReplacement(
+        Navigator.of(context).pushAndRemoveUntil(
           PageRouteBuilder(
             transitionDuration: const Duration(milliseconds: 500),
             pageBuilder: (_, __, ___) => const MainLayout(),
@@ -49,6 +49,7 @@ class _LoginScreenState extends State<LoginScreen> {
               return FadeTransition(opacity: animation, child: child);
             },
           ),
+          (route) => false, // remove all routes below
         );
       }
     } catch (e) {

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../main/screens/main_layout.dart';
+import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/providers/auth_provider.dart';
+import '../../auth/screens/login_screen.dart';
+import '../../main/screens/main_layout.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -16,6 +19,11 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _logoFade;
   late Animation<double> _taglineFade;
   late Animation<Offset> _taglineSlide;
+
+  // Track whether the minimum display time has passed
+  bool _minDelayDone = false;
+  // Track whether AuthProvider has finished restoring the session
+  bool _authReady = false;
 
   @override
   void initState() {
@@ -59,20 +67,43 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    // Navigate to main app after delay
-    Future.delayed(const Duration(milliseconds: 2800), () {
+    // Minimum splash display time (let the animation breathe)
+    Future.delayed(const Duration(milliseconds: 2400), () {
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            transitionDuration: const Duration(milliseconds: 600),
-            pageBuilder: (context, animation, secondaryAnimation) => const MainLayout(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-          ),
-        );
+        _minDelayDone = true;
+        _tryNavigate();
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Listen for auth readiness on every rebuild
+    final auth = context.read<AuthProvider>();
+    if (!auth.isLoading && !_authReady) {
+      _authReady = true;
+      _tryNavigate();
+    }
+  }
+
+  /// Navigate only when BOTH the min delay is done AND auth has resolved.
+  void _tryNavigate() {
+    if (!_minDelayDone || !_authReady) return;
+    if (!mounted) return;
+
+    final isAuthenticated = context.read<AuthProvider>().isAuthenticated;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 600),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            isAuthenticated ? const MainLayout() : const LoginScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
   }
 
   @override
@@ -84,6 +115,14 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Reactively check if auth just finished while we're still on screen
+    final auth = context.watch<AuthProvider>();
+    if (!auth.isLoading && !_authReady) {
+      _authReady = true;
+      // Schedule navigation after the current build frame
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tryNavigate());
+    }
 
     return Scaffold(
       body: Container(
