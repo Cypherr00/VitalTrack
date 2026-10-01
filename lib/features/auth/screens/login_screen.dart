@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/config/supabase_config.dart';
 import '../../../core/providers/auth_provider.dart';
+import '../../../core/utils/validators.dart';
 import '../../main/screens/main_layout.dart';
 import 'register_screen.dart';
 
@@ -36,7 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final auth = context.read<AuthProvider>();
       await auth.login(
-        _emailController.text.trim(),
+        _emailController.text.trim().toLowerCase(),
         _passwordController.text,
       );
 
@@ -44,8 +44,8 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.of(context).pushAndRemoveUntil(
           PageRouteBuilder(
             transitionDuration: const Duration(milliseconds: 500),
-            pageBuilder: (_, __, ___) => const MainLayout(),
-            transitionsBuilder: (_, animation, __, child) {
+            pageBuilder: (context, animation, secondaryAnimation) => const MainLayout(),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
               return FadeTransition(opacity: animation, child: child);
             },
           ),
@@ -142,31 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
 
-                  if (!SupabaseConfig.isConfigured) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withAlpha(25),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.amber.withAlpha(100)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.info_outline, color: Colors.amber, size: 20),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Supabase credentials pending in supabase_config.dart. Please set your URL and anon key to authenticate.',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
                   // Input Card
                   Container(
@@ -197,6 +173,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'name@example.com',
                             prefixIcon: Icon(Icons.email_outlined, color: AppColors.primary),
@@ -208,15 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Please enter your email';
-                            }
-                            if (!value.contains('@') || !value.contains('.')) {
-                              return 'Please enter a valid email address';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateEmail,
                         ),
                         const SizedBox(height: 20),
 
@@ -232,6 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(
                           controller: _passwordController,
                           obscureText: _obscurePassword,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'Enter your password',
                             prefixIcon: Icon(Icons.lock_outline, color: AppColors.primary),
@@ -252,12 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter your password';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateLoginPassword,
                         ),
                       ],
                     ),

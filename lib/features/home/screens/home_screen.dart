@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/config/supabase_config.dart';
 import '../../../core/models/health_threshold.dart';
 import '../../../core/models/user_profile.dart';
 import '../../../core/models/vital_record.dart';
@@ -252,29 +251,6 @@ class _HomeScreenState extends State<HomeScreen>
               padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  if (!SupabaseConfig.isConfigured)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withAlpha(30),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.amber.withAlpha(120)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.info_outline, color: Colors.amber, size: 22),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Supabase credentials pending in supabase_config.dart. Add your URL and anon key to connect.',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
                   // Section label
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,

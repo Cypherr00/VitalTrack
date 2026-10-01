@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/auth_provider.dart';
+import '../../../core/utils/validators.dart';
 import '../../main/screens/main_layout.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -23,7 +24,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _passwordController.addListener(_onPasswordChanged);
+  }
+
+  void _onPasswordChanged() {
+    setState(() {});
+  }
+
+  @override
   void dispose() {
+    _passwordController.removeListener(_onPasswordChanged);
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -40,7 +52,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final auth = context.read<AuthProvider>();
       await auth.register(
         fullName: _nameController.text.trim(),
-        email: _emailController.text.trim(),
+        email: _emailController.text.trim().toLowerCase(),
         password: _passwordController.text,
       );
 
@@ -64,8 +76,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Navigator.of(context).pushAndRemoveUntil(
           PageRouteBuilder(
             transitionDuration: const Duration(milliseconds: 500),
-            pageBuilder: (_, __, ___) => const MainLayout(),
-            transitionsBuilder: (_, animation, __, child) {
+            pageBuilder: (context, animation, secondaryAnimation) => const MainLayout(),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
               return FadeTransition(opacity: animation, child: child);
             },
           ),
@@ -162,6 +174,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         TextFormField(
                           controller: _nameController,
                           textCapitalization: TextCapitalization.words,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'John Doe',
                             prefixIcon: Icon(Icons.person_outline, color: AppColors.primary),
@@ -173,12 +186,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Please enter your full name';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateFullName,
                         ),
                         const SizedBox(height: 18),
 
@@ -195,6 +203,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         TextFormField(
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'name@example.com',
                             prefixIcon: Icon(Icons.email_outlined, color: AppColors.primary),
@@ -206,15 +215,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Please enter your email';
-                            }
-                            if (!value.contains('@') || !value.contains('.')) {
-                              return 'Please enter a valid email address';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateEmail,
                         ),
                         const SizedBox(height: 18),
 
@@ -231,6 +232,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         TextFormField(
                           controller: _passwordController,
                           obscureText: _obscurePassword,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'At least 6 characters',
                             prefixIcon: Icon(Icons.lock_outline, color: AppColors.primary),
@@ -251,16 +253,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter a password';
-                            }
-                            if (value.length < 6) {
-                              return 'Password must be at least 6 characters';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateRegistrationPassword,
                         ),
+
+                        // Password requirements live feedback
+                        _buildPasswordCriteria(isDark),
+
                         const SizedBox(height: 18),
 
                         // Confirm Password
@@ -276,6 +274,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         TextFormField(
                           controller: _confirmPasswordController,
                           obscureText: _obscureConfirmPassword,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           decoration: InputDecoration(
                             hintText: 'Re-enter your password',
                             prefixIcon: Icon(Icons.lock_reset_outlined, color: AppColors.primary),
@@ -296,15 +295,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please confirm your password';
-                            }
-                            if (value != _passwordController.text) {
-                              return 'Passwords do not match';
-                            }
-                            return null;
-                          },
+                          validator: (value) => Validators.validateConfirmPassword(
+                            value,
+                            _passwordController.text,
+                          ),
                         ),
                       ],
                     ),
@@ -368,6 +362,74 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordCriteria(bool isDark) {
+    final password = _passwordController.text;
+    final hasMinLength = Validators.hasMinLength(password, 6);
+    final hasCapital = Validators.hasCapitalLetter(password);
+    final hasSmall = Validators.hasSmallLetter(password);
+    final hasNumOrSymbol = Validators.hasNumberOrSymbol(password);
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF252525) : AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white12 : Colors.grey.withAlpha(50),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Password must contain:',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.grey[300] : Colors.grey[700],
+            ),
+          ),
+          const SizedBox(height: 6),
+          _buildCriteriaItem('At least 6 characters', hasMinLength, isDark),
+          _buildCriteriaItem('1 capital letter (A-Z)', hasCapital, isDark),
+          _buildCriteriaItem('1 small letter (a-z)', hasSmall, isDark),
+          _buildCriteriaItem('1 number or symbol (0-9, !@#...)', hasNumOrSymbol, isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCriteriaItem(String label, bool isMet, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        children: [
+          Icon(
+            isMet ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            size: 15,
+            color: isMet
+                ? AppColors.normalStatus
+                : (isDark ? Colors.grey[500] : Colors.grey[400]),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: isMet
+                    ? (isDark ? Colors.green[300] : Colors.green[800])
+                    : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                fontWeight: isMet ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -99,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: _iconBox(Icons.cloud_sync_outlined, isDark),
                 title: Text(
-                  'Supabase Backend',
+                  'Cloud Sync',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
@@ -108,8 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 subtitle: Text(
                   SupabaseConfig.isConfigured
-                      ? 'Connected (${SupabaseConfig.supabaseUrl})'
-                      : 'Not configured — please set keys',
+                      ? 'Connected'
+                      : 'Offline',
                   style: TextStyle(
                     fontSize: 12,
                     color: SupabaseConfig.isConfigured
