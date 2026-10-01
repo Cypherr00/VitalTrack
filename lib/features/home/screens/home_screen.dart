@@ -69,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       // 1. Fetch user profile from auth or database
       final authUser = context.read<AuthProvider>().currentUser;
-      final user = authUser ?? await _supabase.fetchUserProfile();
+      final user = authUser ?? await _supabase.fetchUserProfile(authUser?.id);
       final userId = user?.id;
 
       // 2. Fetch thresholds & records concurrently

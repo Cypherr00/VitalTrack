@@ -1,5 +1,6 @@
 class UserProfile {
   final String id;
+  final String? userAccessId;
   final String fullName;
   final String email;
   final String? password;
@@ -7,14 +8,19 @@ class UserProfile {
 
   UserProfile({
     required this.id,
+    this.userAccessId,
     required this.fullName,
     required this.email,
     this.password,
     required this.createdAt,
   });
 
-  /// Short 6-digit display code derived from the UUID (or first 6 chars)
+  /// 6-digit access code from the 'user_access_id' column in the 'users' table.
+  /// Falls back to deriving a 6-character code from the UUID if user_access_id is not set.
   String get displayId {
+    if (userAccessId != null && userAccessId!.trim().isNotEmpty) {
+      return userAccessId!.trim();
+    }
     final clean = id.replaceAll('-', '');
     if (clean.length >= 6) {
       return clean.substring(0, 6).toUpperCase();
@@ -25,6 +31,7 @@ class UserProfile {
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       id: json['id']?.toString() ?? '',
+      userAccessId: json['user_access_id']?.toString(),
       fullName: json['full_name']?.toString() ?? 'User',
       email: json['email']?.toString() ?? '',
       password: json['password']?.toString(),
@@ -47,6 +54,7 @@ class UserProfile {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      if (userAccessId != null) 'user_access_id': userAccessId,
       'full_name': fullName,
       'email': email,
       if (password != null) 'password': password,

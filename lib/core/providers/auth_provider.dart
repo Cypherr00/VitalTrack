@@ -5,6 +5,7 @@ import '../services/supabase_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   static const String _keyUserId = 'vital_track_user_id';
+  static const String _keyUserAccessId = 'vital_track_user_access_id';
   static const String _keyUserName = 'vital_track_user_name';
   static const String _keyUserEmail = 'vital_track_user_email';
 
@@ -36,8 +37,10 @@ class AuthProvider extends ChangeNotifier {
             // Restore from cached info
             final name = prefs.getString(_keyUserName) ?? 'User';
             final email = prefs.getString(_keyUserEmail) ?? '';
+            final accessId = prefs.getString(_keyUserAccessId);
             _currentUser = UserProfile(
               id: savedId,
+              userAccessId: accessId,
               fullName: name,
               email: email,
               createdAt: DateTime.now(),
@@ -47,8 +50,10 @@ class AuthProvider extends ChangeNotifier {
           // Restore from cache if Supabase credentials pending
           final name = prefs.getString(_keyUserName) ?? 'User';
           final email = prefs.getString(_keyUserEmail) ?? '';
+          final accessId = prefs.getString(_keyUserAccessId);
           _currentUser = UserProfile(
             id: savedId,
+            userAccessId: accessId,
             fullName: name,
             email: email,
             createdAt: DateTime.now(),
@@ -74,6 +79,9 @@ class AuthProvider extends ChangeNotifier {
     await prefs.setString(_keyUserId, user.id);
     await prefs.setString(_keyUserName, user.fullName);
     await prefs.setString(_keyUserEmail, user.email);
+    if (user.userAccessId != null) {
+      await prefs.setString(_keyUserAccessId, user.userAccessId!);
+    }
 
     notifyListeners();
   }
@@ -94,6 +102,9 @@ class AuthProvider extends ChangeNotifier {
     await prefs.setString(_keyUserId, user.id);
     await prefs.setString(_keyUserName, user.fullName);
     await prefs.setString(_keyUserEmail, user.email);
+    if (user.userAccessId != null) {
+      await prefs.setString(_keyUserAccessId, user.userAccessId!);
+    }
 
     notifyListeners();
   }
@@ -102,6 +113,7 @@ class AuthProvider extends ChangeNotifier {
     _currentUser = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyUserId);
+    await prefs.remove(_keyUserAccessId);
     await prefs.remove(_keyUserName);
     await prefs.remove(_keyUserEmail);
 

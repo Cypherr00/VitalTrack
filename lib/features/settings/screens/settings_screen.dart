@@ -31,7 +31,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     try {
-      final user = await SupabaseService().fetchUserProfile();
+      final authUser = context.read<AuthProvider>().currentUser;
+      final user = await SupabaseService().fetchUserProfile(authUser?.id);
       if (mounted) {
         setState(() {
           _userProfile = user;
